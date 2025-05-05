@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Railway Station Monitoring Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .alert-high { background-color: #ffebee; border-left: 5px solid #f44336; }
+        .alert-medium { background-color: #fff3e0; border-left: 5px solid #ff9800; }
+        .alert-low { background-color: #e8f5e9; border-left: 5px solid #4caf50; }
+        .zone-card { transition: all 0.3s; }
+        .zone-card.overcrowded { background-color: #ffebee; }
+        .video-container { position: relative; }
+        .overlay-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .source-selector {
+            background: rgba(255,255,255,0.9);
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">Railway Station Monitoring System</span>
+            <div class="d-flex">
+                <button type="button" class="btn btn-light me-2" data-bs-toggle="modal" data-bs-target="#cctvConfigModal">
+                    <i class="fas fa-cog"></i> CCTV Config
+                </button>
+                <button id="startBtn" class="btn btn-success me-2" disabled>
+                    <i class="fas fa-play"></i> Start Monitoring
+                </button>
+                <button id="stopBtn" class="btn btn-danger" disabled>
+                    <i class="fas fa-stop"></i> Stop
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-3">
+        <div class="row">
+            <!-- Source Selection -->
+            <div class="col-12 mb-3">
+                <div class="source-selector">
+                    <h5>Select Video Source</h5>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="sourceType" id="cctvSource" value="cctv">
+                                <label class="form-check-label" for="cctvSource">
+                                    CCTV Network
+                                </label>
+                            </div>
+                            <select id="cctvSelect" class="form-select mb-3" disabled>
+                                {% for camera_id, camera in cctv_sources.items() %}
+                                <option value="{{ camera_id }}" {% if not camera.enabled %}disabled{% endif %}>
+                                    {{ camera.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="sourceType" id="localSource" value="file">
+                                <label class="form-check-label" for="localSource">
+                                    Local Video File
+                                </label>
+                            </div>
+                            <select id="localFileSelect" class="form-select mb-3" disabled>
+                                <option value="">Select a local video...</option>
+                                {% for video in local_videos %}
+                                <option value="{{ video }}">{{ video }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="sourceType" id="uploadSource" value="upload">
+                                <label class="form-check-label" for="uploadSource">
+                                    Upload Video File
+                                </label>
+                            </div>
+                            <input type="file" id="videoFile" class="form-control" accept="video/*" disabled>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Feed Column -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Live Monitoring Feed</h5>
+                    </div>
+                    <div class="card-body video-container">
+                        <img src="{{ url_for('video_feed') }}" class="img-fluid w-100">
+                    </div>
+                </div>
+
+                <!-- Zone Statistics -->
+                <div class="row mt-3">
+                    <!-- Gates Status -->
+                    <div class="col-md-12 mb-3">
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="card-title mb-0">Gate Status</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="card" id="gate1Card">
+                                            <div class="card-body text-center">
+                                                <h5>Gate 1</h5>
+                                                <div id="gate1Status" class="badge bg-success mb-2">OPEN</div>
+                                                <h3 id="gate1Count">0</h3>
+                                                <small class="text-muted">People</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="card" id="gate2Card">
+                                            <div class="card-body text-center">
+                                                <h5>Gate 2</h5>
+                                                <div id="gate2Status" class="badge bg-success mb-2">OPEN</div>
+                                                <h3 id="gate2Count">0</h3>
+                                                <small class="text-muted">People</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="card" id="gate3Card">
+                                            <div class="card-body text-center">
+                                                <h5>Gate 3</h5>
+                                                <div id="gate3Status" class="badge bg-success mb-2">OPEN</div>
+                                                <h3 id="gate3Count">0</h3>
+                                                <small class="text-muted">People</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Platform and Other Zones -->
+                    <div class="col-md-3">
+                        <div class="card zone-card" id="platform1Card">
+                            <div class="card-body">
+                                <h6 class="card-title">Platform 1</h6>
+                                <h2 id="platform1Count">0</h2>
+                                <p class="mb-0">People</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card zone-card" id="platform2Card">
+                            <div class="card-body">
+                                <h6 class="card-title">Platform 2</h6>
+                                <h2 id="platform2Count">0</h2>
+                                <p class="mb-0">People</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card zone-card" id="stairsCard">
+                            <div class="card-body">
+                                <h6 class="card-title">Stairs</h6>
+                                <h2 id="stairsCount">0</h2>
+                                <p class="mb-0">People</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card zone-card" id="prohibitedCard">
+                            <div class="card-body">
+                                <h6 class="card-title">Prohibited Area</h6>
+                                <h2 id="prohibitedCount">0</h2>
+                                <p class="mb-0">People</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alerts Section -->
+                <div class="card mb-3">
+                    <div class="card-header bg-danger text-white">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-exclamation-triangle"></i> Live Alerts
+                        </h5>
+                    </div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        <div id="alertsList"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Column -->
+            <div class="col-md-4">
+                <!-- Total Count Card -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">Total People</h5>
+                        <h1 id="totalCount" class="display-4">0</h1>
+                        <div id="hourlyAverage" class="text-muted">
+                            Current Hour Average: <span>0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Platform Analytics -->
+                <div class="card mb-3">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Platform Analytics</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>Platform 1</h6>
+                                <div class="mb-2">
+                                    <small class="text-muted">Average</small>
+                                    <div id="p1Average">0</div>
+                                </div>
+                                <div class="mb-2">
+                                    <small class="text-muted">Peak</small>
+                                    <div id="p1Peak">0</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Platform 2</h6>
+                                <div class="mb-2">
+                                    <small class="text-muted">Average</small>
+                                    <div id="p2Average">0</div>
+                                </div>
+                                <div class="mb-2">
+                                    <small class="text-muted">Peak</small>
+                                    <div id="p2Peak">0</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Peak Times Analysis -->
+                <div class="card mb-3">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="card-title mb-0">Recent Peak Times Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="peakTimesChart"></canvas>
+                        <div class="mt-3">
+                            <ul id="peakTimesList" class="list-unstyled mb-0">
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Crowd Trend -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Crowd Trend</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="crowdTrendChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Platform Comparison Chart -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Platform Comparison</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="platformComparisonChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CCTV Configuration Modal -->
+    <div class="modal fade" id="cctvConfigModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">CCTV Configuration</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    {% for camera_id, camera in cctv_sources.items() %}
+                    <div class="mb-3">
+                        <h6>{{ camera.name }}</h6>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input camera-enabled" type="checkbox" 
+                                   id="enabled_{{ camera_id }}" 
+                                   data-camera-id="{{ camera_id }}"
+                                   {% if camera.enabled %}checked{% endif %}>
+                            <label class="form-check-label" for="enabled_{{ camera_id }}">Enabled</label>
+                        </div>
+                        <input type="text" class="form-control camera-url" 
+                               id="url_{{ camera_id }}"
+                               data-camera-id="{{ camera_id }}"
+                               value="{{ camera.url }}"
+                               placeholder="RTSP URL">
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="saveCctvConfig">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let crowdChart;
+        let platformChart;
+        let peakTimesChart;  // New chart for peak times
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        
+        // Initialize charts
+        function initCharts() {
+            // Crowd Trend Chart
+            const crowdCtx = document.getElementById('crowdTrendChart').getContext('2d');
+            crowdChart = new Chart(crowdCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Total People',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            // Platform Comparison Chart
+            const platformCtx = document.getElementById('platformComparisonChart').getContext('2d');
+            platformChart = new Chart(platformCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['Platform 1', 'Platform 2'],
+                    datasets: [{
+                        label: 'Current',
+                        data: [0, 0],
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                        borderColor: 'rgb(75, 192, 192)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Average',
+                        data: [0, 0],
+                        backgroundColor: 'rgba(255, 159, 64, 0.5)',
+                        borderColor: 'rgb(255, 159, 64)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            // Peak Times Analysis Chart
+            const peakTimesCtx = document.getElementById('peakTimesChart').getContext('2d');
+            peakTimesChart = new Chart(peakTimesCtx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Total Count',
+                        data: [],
+                        backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                        borderColor: 'rgb(255, 99, 132)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Platform 1',
+                        data: [],
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgb(54, 162, 235)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Platform 2',
+                        data: [],
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                        borderColor: 'rgb(75, 192, 192)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of People'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Peak Time Distribution'
+                        },
+                        legend: {
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateDashboard() {
+            fetch('/get_stats')
+                .then(response => response.json())
+                .then(data => {
+                    // Update total count with alert if over threshold
+                    const totalCount = document.getElementById('totalCount');
+                    totalCount.textContent = data.current_count;
+                    if (data.current_count > 24) {
+                        totalCount.classList.add('text-danger');
+                        totalCount.style.animation = 'blink 1s infinite';
+                    } else {
+                        totalCount.classList.remove('text-danger');
+                        totalCount.style.animation = '';
+                    }
+                    
+                    // Update hourly average
+                    document.getElementById('hourlyAverage').querySelector('span').textContent = 
+                        data.analytics.hourly_average;
+                    
+                    // Update platform counts and analytics
+                    document.getElementById('platform1Count').textContent = data.zone_counts.platform_1;
+                    document.getElementById('platform2Count').textContent = data.zone_counts.platform_2;
+                    
+                    // Update platform analytics
+                    const p1Stats = data.analytics.platform_usage.platform_1;
+                    const p2Stats = data.analytics.platform_usage.platform_2;
+                    
+                    document.getElementById('p1Average').textContent = Math.round(p1Stats.average);
+                    document.getElementById('p1Peak').textContent = p1Stats.peak;
+                    document.getElementById('p2Average').textContent = Math.round(p2Stats.average);
+                    document.getElementById('p2Peak').textContent = p2Stats.peak;
+                    
+                    // Update peak times chart and list
+                    if (data.analytics.peak_times.length > 0) {
+                        // Update chart data
+                        peakTimesChart.data.labels = data.analytics.peak_times.map(pt => pt.time);
+                        peakTimesChart.data.datasets[0].data = data.analytics.peak_times.map(pt => pt.count);
+                        peakTimesChart.data.datasets[1].data = data.analytics.peak_times.map(pt => pt.platform1);
+                        peakTimesChart.data.datasets[2].data = data.analytics.peak_times.map(pt => pt.platform2);
+                        peakTimesChart.update();
+                        
+                        // Update list with detailed information
+                        const peakTimesList = document.getElementById('peakTimesList');
+                        peakTimesList.innerHTML = data.analytics.peak_times.map(pt => `
+                            <li class="mb-2">
+                                <i class="fas fa-clock text-warning"></i>
+                                <strong>${pt.time}</strong> - 
+                                Total: ${pt.count} people
+                                (P1: ${pt.platform1}, P2: ${pt.platform2})
+                            </li>
+                        `).join('');
+                    }
+                    
+                    // Update alerts
+                    const alertsList = document.getElementById('alertsList');
+                    alertsList.innerHTML = data.alerts.map(alert => `
+                        <div class="alert alert-${alert.severity === 'high' ? 'danger' : 'warning'} mb-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <strong>${alert.type === 'total' ? 'TOTAL CROWD' : alert.zone.replace('_', ' ').toUpperCase()}</strong>
+                                <small>${alert.timestamp}</small>
+                            </div>
+                            <p class="mb-0">${alert.message}</p>
+                        </div>
+                    `).join('');
+                    
+                    // Update platform cards based on counts
+                    const platform1Card = document.getElementById('platform1Card');
+                    const platform2Card = document.getElementById('platform2Card');
+                    
+                    if (data.zone_counts.platform_1 > 20) {
+                        platform1Card.classList.add('overcrowded');
+                    } else {
+                        platform1Card.classList.remove('overcrowded');
+                    }
+                    
+                    if (data.zone_counts.platform_2 > 20) {
+                        platform2Card.classList.add('overcrowded');
+                    } else {
+                        platform2Card.classList.remove('overcrowded');
+                    }
+                    
+                    // Update crowd trend chart
+                    if (data.crowd_history.length > 0) {
+                        const latest = data.crowd_history[data.crowd_history.length - 1];
+                        crowdChart.data.labels.push(latest.timestamp);
+                        crowdChart.data.datasets[0].data.push(latest.total);
+                        
+                        if (crowdChart.data.labels.length > 20) {
+                            crowdChart.data.labels.shift();
+                            crowdChart.data.datasets[0].data.shift();
+                        }
+                        crowdChart.update();
+                    }
+                    
+                    // Update platform comparison chart
+                    platformChart.data.datasets[0].data = [
+                        data.zone_counts.platform_1,
+                        data.zone_counts.platform_2
+                    ];
+                    platformChart.data.datasets[1].data = [
+                        Math.round(p1Stats.average),
+                        Math.round(p2Stats.average)
+                    ];
+                    platformChart.update();
+                });
+        }
+
+        function updateZoneCard(zone, count, threshold) {
+            const card = document.getElementById(zone + 'Card');
+            if (count > threshold) {
+                card.classList.add('overcrowded');
+            } else {
+                card.classList.remove('overcrowded');
+            }
+        }
+
+        function updateGateStatus(gate, count, status) {
+            const statusBadge = document.getElementById(gate + 'Status');
+            const countElement = document.getElementById(gate + 'Count');
+            const card = document.getElementById(gate + 'Card');
+            
+            countElement.textContent = count;
+            statusBadge.textContent = status.toUpperCase();
+            
+            // Update badge color based on status
+            statusBadge.className = 'badge mb-2 ';
+            switch(status.toLowerCase()) {
+                case 'closed':
+                    statusBadge.classList.add('bg-danger');
+                    break;
+                case 'crowded':
+                    statusBadge.classList.add('bg-warning');
+                    break;
+                case 'busy':
+                    statusBadge.classList.add('bg-info');
+                    break;
+                default:
+                    statusBadge.classList.add('bg-success');
+            }
+        }
+
+        // Source selection handling
+        document.querySelectorAll('input[name="sourceType"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                document.getElementById('cctvSelect').disabled = this.value !== 'cctv';
+                document.getElementById('localFileSelect').disabled = this.value !== 'file';
+                document.getElementById('videoFile').disabled = this.value !== 'upload';
+                document.getElementById('startBtn').disabled = false;
+            });
+        });
+
+        // Start monitoring with selected source
+        document.getElementById('startBtn').addEventListener('click', function() {
+            const sourceType = document.querySelector('input[name="sourceType"]:checked').value;
+            const formData = new FormData();
+            
+            if (sourceType === 'cctv') {
+                formData.append('source_type', 'cctv');
+                formData.append('camera_id', document.getElementById('cctvSelect').value);
+            } else if (sourceType === 'file') {
+                formData.append('source_type', 'file');
+                formData.append('local_file', document.getElementById('localFileSelect').value);
+            } else if (sourceType === 'upload') {
+                formData.append('source_type', 'file');
+                const fileInput = document.getElementById('videoFile');
+                if (fileInput.files.length > 0) {
+                    formData.append('video_file', fileInput.files[0]);
+                }
+            }
+
+            fetch('/start_monitoring', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    window.updateInterval = setInterval(updateDashboard, 1000);
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            });
+        });
+
+        // CCTV Configuration handling
+        document.getElementById('saveCctvConfig').addEventListener('click', function() {
+            const updates = [];
+            document.querySelectorAll('.camera-url').forEach(input => {
+                const cameraId = input.dataset.cameraId;
+                updates.push({
+                    camera_id: cameraId,
+                    url: input.value,
+                    enabled: document.getElementById('enabled_' + cameraId).checked
+                });
+            });
+
+            Promise.all(updates.map(update =>
+                fetch('/update_cctv_config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(update)
+                })
+            ))
+            .then(() => {
+                location.reload();
+            })
+            .catch(error => {
+                alert('Error saving CCTV configuration');
+            });
+        });
+
+        // Add stop button functionality
+        document.getElementById('stopBtn').addEventListener('click', function() {
+            fetch('/stop_monitoring')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                        clearInterval(window.updateInterval);
+                        // Reset all counts and status
+                        document.getElementById('totalCount').textContent = '0';
+                        document.querySelectorAll('[id$="Count"]').forEach(el => el.textContent = '0');
+                        document.querySelectorAll('.badge').forEach(el => {
+                            el.className = 'badge bg-secondary mb-2';
+                            el.textContent = 'CLOSED';
+                        });
+                    }
+                });
+        });
+
+        // Add blinking animation for alerts
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes blink {
+                0% { opacity: 1; }
+                50% { opacity: 0.5; }
+                100% { opacity: 1; }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Initialize
+        initCharts();
+    </script>
+</body>
+</html> 
